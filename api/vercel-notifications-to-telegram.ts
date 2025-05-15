@@ -22,12 +22,16 @@ async function getRawBody(req: VercelRequest): Promise<Buffer> {
   });
 }
 
-// --- Vercel Webhook Payload Interface (customize as needed) ---
+// --- Helper function to calculate SHA1 hash (like in the example) ---
+function calculateSha1Hash(data: Buffer, secret: string): string {
+  return createHmac("sha1", secret).update(data).digest("hex");
+}
 
-// api/vercel-notifications-to-telegram.ts
-// ... (other imports and functions like getRawBody, VercelWebhook interface, etc.)
-
+// --- Main Handler Function ---
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Log all headers to confirm what's being received
+  console.log("RAW INCOMING HEADERS:", JSON.stringify(req.headers, null, 2));
+
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).end("Method Not Allowed");
@@ -39,83 +43,83 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).send("Internal server configuration error.");
   }
 
-  const signatureHeader = req.headers["x-vercel-signature"] as string;
-  if (!signatureHeader) {
+  // Node.js typically lowercases header names.
+  const receivedSignatureHeader = req.headers["x-vercel-signature"] as string;
+  if (!receivedSignatureHeader) {
     console.warn("Missing x-vercel-signature header.");
     return res.status(401).send("Signature missing.");
   }
 
-  let rawBody: Buffer;
+  let rawBodyBuffer: Buffer;
   try {
-    rawBody = await getRawBody(req);
+    rawBodyBuffer = await getRawBody(req);
   } catch (error) {
     console.error("Error reading raw body:", error);
     return res.status(500).send("Error processing request body.");
   }
 
-  const expectedSignature = `sha1=${createHmac("sha1", vercelWebhookSecret)
-    .update(rawBody)
-    .digest("hex")}`;
-
-  // --- START DEBUG LOGS ---
-  console.log(
-    `Received x-vercel-signature header: '${signatureHeader}' (Length: ${signatureHeader.length})`
-  );
-  console.log(
-    `Calculated expected signature: '${expectedSignature}' (Length: ${expectedSignature.length})`
-  );
-
-  const signatureHeaderBuffer = Buffer.from(signatureHeader);
-  const expectedSignatureBuffer = Buffer.from(expectedSignature);
+  // Calculate the expected hash (40 characters)
+  const expectedHash = calculateSha1Hash(rawBodyBuffer, vercelWebhookSecret);
 
   console.log(
-    `Signature Header Buffer Length: ${signatureHeaderBuffer.byteLength}`
+    `Received x-vercel-signature header: '${receivedSignatureHeader}' (Length: ${receivedSignatureHeader.length})`
   );
   console.log(
-    `Expected Signature Buffer Length: ${expectedSignatureBuffer.byteLength}`
+    `Calculated expected hash: '${expectedHash}' (Length: ${expectedHash.length})`
   );
-  // --- END DEBUG LOGS ---
 
-  if (signatureHeaderBuffer.byteLength !== expectedSignatureBuffer.byteLength) {
+  // Prepare buffers for timingSafeEqual.
+  // We are now assuming receivedSignatureHeader is the raw 40-char hash.
+  const receivedSignatureBuffer = Buffer.from(receivedSignatureHeader, "utf-8");
+  const expectedHashBuffer = Buffer.from(expectedHash, "utf-8");
+
+  console.log(
+    `Received Signature Buffer Byte Length: ${receivedSignatureBuffer.byteLength}`
+  );
+  console.log(
+    `Expected Hash Buffer Byte Length: ${expectedHashBuffer.byteLength}`
+  );
+
+  // Check lengths before timingSafeEqual. This is crucial.
+  if (receivedSignatureBuffer.byteLength !== expectedHashBuffer.byteLength) {
     console.error(
-      "Signature buffers have different byte lengths. Cannot use timingSafeEqual."
+      "Signature and expected hash buffers have different byte lengths. " +
+        `Received: ${receivedSignatureBuffer.byteLength}, Expected: ${expectedHashBuffer.byteLength}. ` +
+        "This could mean the 'x-vercel-signature' header unexpectedly contained 'sha1=' or was malformed."
     );
-    // This log helps confirm the direct cause of the RangeError before timingSafeEqual is even called.
-    // However, timingSafeEqual itself throws the error if lengths are different.
-    // The primary purpose of the logs above is to see *why* they are different.
     return res.status(401).send("Invalid signature due to length mismatch.");
   }
 
-  if (
-    !timingSafeEqual(
-      signatureHeaderBuffer, // Use the buffer directly
-      expectedSignatureBuffer // Use the buffer directly
-    )
-  ) {
+  // Perform the timing-safe comparison
+  if (!timingSafeEqual(receivedSignatureBuffer, expectedHashBuffer)) {
     console.warn("Invalid signature (timingSafeEqual failed).");
     return res.status(401).send("Invalid signature.");
   }
 
-  // ... rest of your code (parsing JSON, sending Telegram message)
+  console.log("Signature validation passed.");
+
+  // --- Signature is valid, now parse the body as JSON ---
   let webhookPayload: VercelWebhook;
   try {
-    webhookPayload = JSON.parse(rawBody.toString("utf-8")) as VercelWebhook;
+    webhookPayload = JSON.parse(
+      rawBodyBuffer.toString("utf-8")
+    ) as VercelWebhook;
   } catch (error) {
-    console.error("Error parsing JSON payload:", error);
+    console.error(
+      "Error parsing JSON payload after signature verification:",
+      error
+    );
     return res.status(400).send("Invalid JSON payload.");
   }
 
-  // ... (formatVercelMessageForTelegram and sendTelegramMessage calls)
-  console.log(
-    "Received valid Vercel webhook:",
-    JSON.stringify(webhookPayload, null, 2)
-  );
+  console.log("Webhook payload parsed successfully.");
 
+  // --- Process the webhook and send Telegram message ---
   const TARGET_CHAT_ID = process.env.TELEGRAM_TARGET_CHAT_ID;
   if (!TARGET_CHAT_ID) {
     console.error("TELEGRAM_TARGET_CHAT_ID environment variable not set.");
     return res
-      .status(200)
+      .status(200) // Acknowledge webhook, but log internal issue
       .send("Webhook received, but Telegram chat ID not configured.");
   }
 
@@ -124,7 +128,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const success = await sendTelegramMessage(
     TARGET_CHAT_ID,
     telegramMessage,
-    "MarkdownV2"
+    "MarkdownV2" // Ensure your formatVercelMessageForTelegram escapes for this
   );
 
   if (success) {
