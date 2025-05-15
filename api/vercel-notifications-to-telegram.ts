@@ -24,7 +24,9 @@ async function getRawBody(req: VercelRequest): Promise<Buffer> {
 
 // --- Vercel Webhook Payload Interface (customize as needed) ---
 
-// --- Main Handler Function ---
+// api/vercel-notifications-to-telegram.ts
+// ... (other imports and functions like getRawBody, VercelWebhook interface, etc.)
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -55,16 +57,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .update(rawBody)
     .digest("hex")}`;
 
+  // --- START DEBUG LOGS ---
+  console.log(
+    `Received x-vercel-signature header: '${signatureHeader}' (Length: ${signatureHeader.length})`
+  );
+  console.log(
+    `Calculated expected signature: '${expectedSignature}' (Length: ${expectedSignature.length})`
+  );
+
+  const signatureHeaderBuffer = Buffer.from(signatureHeader);
+  const expectedSignatureBuffer = Buffer.from(expectedSignature);
+
+  console.log(
+    `Signature Header Buffer Length: ${signatureHeaderBuffer.byteLength}`
+  );
+  console.log(
+    `Expected Signature Buffer Length: ${expectedSignatureBuffer.byteLength}`
+  );
+  // --- END DEBUG LOGS ---
+
+  if (signatureHeaderBuffer.byteLength !== expectedSignatureBuffer.byteLength) {
+    console.error(
+      "Signature buffers have different byte lengths. Cannot use timingSafeEqual."
+    );
+    // This log helps confirm the direct cause of the RangeError before timingSafeEqual is even called.
+    // However, timingSafeEqual itself throws the error if lengths are different.
+    // The primary purpose of the logs above is to see *why* they are different.
+    return res.status(401).send("Invalid signature due to length mismatch.");
+  }
+
   if (
     !timingSafeEqual(
-      Buffer.from(signatureHeader),
-      Buffer.from(expectedSignature)
+      signatureHeaderBuffer, // Use the buffer directly
+      expectedSignatureBuffer // Use the buffer directly
     )
   ) {
-    console.warn("Invalid signature.");
+    console.warn("Invalid signature (timingSafeEqual failed).");
     return res.status(401).send("Invalid signature.");
   }
 
+  // ... rest of your code (parsing JSON, sending Telegram message)
   let webhookPayload: VercelWebhook;
   try {
     webhookPayload = JSON.parse(rawBody.toString("utf-8")) as VercelWebhook;
@@ -73,6 +105,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).send("Invalid JSON payload.");
   }
 
+  // ... (formatVercelMessageForTelegram and sendTelegramMessage calls)
   console.log(
     "Received valid Vercel webhook:",
     JSON.stringify(webhookPayload, null, 2)
@@ -86,12 +119,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .send("Webhook received, but Telegram chat ID not configured.");
   }
 
-  // Format the message using the new function
   const telegramMessage = formatVercelMessageForTelegram(webhookPayload);
 
   const success = await sendTelegramMessage(
     TARGET_CHAT_ID,
-    telegramMessage, // Already escaped within formatVercelMessageForTelegram
+    telegramMessage,
     "MarkdownV2"
   );
 
