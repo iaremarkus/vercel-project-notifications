@@ -2,13 +2,16 @@
   "compilerOptions": {
     "target": "es2020", // Or newer
     "module": "commonjs", // Or "esnext" if you prefer ES modules
-    "rootDir": "./src",
+    "rootDir": "./",
     "outDir": "./dist",
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "**/*.spec.ts"]
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "**/*.spec.ts"],
+  "paths": {
+    "@/*": ["./*"]
+  }
 }
