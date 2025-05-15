@@ -1,21 +1,7 @@
-// src/telegramService.ts
+import { SendMessagePayload, TelegramResponse } from "../types";
 
 // It's best practice to store your bot token as an environment variable
 const BOT_TOKEN: string | undefined = process.env.TELEGRAM_BOT_TOKEN;
-
-interface SendMessagePayload {
-  chat_id: string | number;
-  text: string;
-  parse_mode?: "MarkdownV2" | "HTML";
-  // Add other optional sendMessage parameters here if needed
-}
-
-interface TelegramResponse {
-  ok: boolean;
-  result?: any;
-  description?: string;
-  error_code?: number;
-}
 
 /**
  * Sends a message to a specific Telegram chat_id using a bot token via native fetch.
