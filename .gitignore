@@ -1,4 +1,13 @@
-# Craft 2 Storage (https://craftcms.com/support/craft-storage-gitignore)
-# not necessary for Craft 3 (https://github.com/craftcms/craft/issues/26)
-/craft/storage/*
-!/craft/storage/rebrand
+build
+dist / media
+node_modules
+.DS_Store
+.env
+.next
+.vercel
+
+# Payload default media upload directory
+public/media/
+
+public/robots.txt
+public/sitemap*.xml
